@@ -23,6 +23,26 @@ def load_backgrounds(bg_dir='Backgrounds'):
 def resize_bg(cur_bg, w, h):
     return cv2.resize(cur_bg, (w, h))
 
+def apply_background(frame, bg_img):
+    # Chuyển ảnh sang RGB cho MediaPipe
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    # Dự đoán segmentation mask
+    results = segmentation.process(rgb)
+
+    if results.segmentation_mask is None:
+        return frame  # fallback nếu không detect được người
+
+    # Tạo mask nhị phân
+    mask = results.segmentation_mask
+    condition = mask > 0.6  # ngưỡng càng cao thì tách càng sát người
+
+    # Resize bg_img nếu cần (đã resize ở ngoài)
+    bg_img = cv2.resize(bg_img, (frame.shape[1], frame.shape[0]))
+
+    # Kết hợp ảnh
+    output_image = np.where(condition[..., None], frame, bg_img)
+    return output_image
 
 def main():
     cap = cv2.VideoCapture(0)

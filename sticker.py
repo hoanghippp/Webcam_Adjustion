@@ -26,15 +26,59 @@ def load_sticker(sticker_dir='Stickers'):
                 print(f"Ảnh {file} không có kênh alpha (4 kênh), bỏ qua.")
     return stickers
 
-def overlay_sticker(frame, sticker, x, y, w, h):
-    sticker_resized = cv2.resize(sticker, (w, h))
-    alpha_s = sticker_resized[:, :, 3] / 255.0
-    alpha_l = 1.0 - alpha_s
+def overlay_transparent(background, overlay, x, y, overlay_size=None):
+    """Overlay PNG trong suốt lên ảnh gốc tại (x, y)"""
+    if overlay_size:
+        overlay = cv2.resize(overlay, overlay_size)
 
-    for c in range(3):
-        frame[y:y+h, x:x+w, c] = (
-            alpha_s * sticker_resized[:, :, c] + alpha_l * frame[y:y+h, x:x+w, c]
-        )
+    b, g, r, a = cv2.split(overlay)
+    overlay_rgb = cv2.merge((b, g, r))
+    mask = cv2.merge((a, a, a)) / 255.0
+
+    h, w = overlay.shape[:2]
+    roi = background[y:y+h, x:x+w]
+
+    if roi.shape[0] != h or roi.shape[1] != w:
+        return background  # tránh lỗi khi overlay vượt ra ngoài
+
+    blended = (1.0 - mask) * roi + mask * overlay_rgb
+    background[y:y+h, x:x+w] = blended.astype(np.uint8)
+
+    return background
+
+def apply_sticker(frame, sticker_img):
+    """
+    Gắn sticker PNG trong suốt (ví dụ: kính, nón) lên mặt người trong frame.
+    """
+    h, w = frame.shape[:2]
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(rgb)
+
+    if not results.multi_face_landmarks:
+        return frame
+
+    face = results.multi_face_landmarks[0]
+    ih, iw = h, w
+
+    # Lấy điểm mắt trái (33) và mắt phải (263)
+    left_eye = face.landmark[33]
+    right_eye = face.landmark[263]
+
+    x1, y1 = int(left_eye.x * iw), int(left_eye.y * ih)
+    x2, y2 = int(right_eye.x * iw), int(right_eye.y * ih)
+
+    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2  # tâm giữa 2 mắt
+    w_sticker = int(1.3 * abs(x2 - x1))     # chiều rộng dựa trên khoảng cách giữa mắt
+    h_sticker = int(sticker_img.shape[0] * w_sticker / sticker_img.shape[1])  # theo tỉ lệ PNG gốc
+
+    x_offset = cx - w_sticker // 2
+    y_offset = cy - h_sticker // 2
+
+    # Giới hạn vùng không bị out-of-bounds
+    x_offset = max(0, x_offset)
+    y_offset = max(0, y_offset)
+
+    frame = overlay_transparent(frame, sticker_img, x_offset, y_offset, (w_sticker, h_sticker))
     return frame
 
 def main():
